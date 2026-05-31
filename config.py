@@ -54,8 +54,8 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 # CryptoPanic API Token (Optional, falls back gracefully)
 CRYPTOPANIC_TOKEN: str = os.getenv("CRYPTOPANIC_TOKEN", "")
 
-# Phase 2 API (Optional for Phase 1)
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+# Phase 2 LLM Sentiment API (Optional, falls back gracefully)
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
 def validate_config() -> None:
     """

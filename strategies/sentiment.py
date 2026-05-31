@@ -118,18 +118,18 @@ def _score_sentiment_locally(headlines: List[str]) -> float:
     return avg_score
 
 
-def _score_sentiment_via_claude(headlines: List[str]) -> float:
+def _score_sentiment_via_groq(headlines: List[str]) -> float:
     """
-    Connects to the Anthropic Claude API to perform professional sentiment analysis.
-    Falls back to local keyword scorer if key is missing or fails.
+    Connects to the Groq API to perform professional sentiment analysis on news headlines.
+    Falls back to local keyword scorer if Groq API key is missing or request fails.
     
     Accepts:
         headlines (list[str]): List of headline strings.
     Returns:
-        float: Aggregated sentiment score between -1.0 and +1.0.
+        float: Aggregated sentiment score between -1.0 (extremely bearish) and +1.0 (extremely bullish).
     """
-    key = config.ANTHROPIC_API_KEY
-    if not key or key == "your_anthropic_api_key_here":
+    key = config.GROQ_API_KEY
+    if not key or key == "your_groq_api_key_here":
         return _score_sentiment_locally(headlines)
 
     # Compile the headlines list into a prompt format
@@ -142,40 +142,40 @@ def _score_sentiment_via_claude(headlines: List[str]) -> float:
         "Your output must contain EXACTLY a float representation of the score and nothing else."
     )
 
-    url = "https://api.anthropic.com/v1/messages"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
     }
     payload = {
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 10,
-        "system": system_prompt,
+        "model": "llama-3.3-70b-specdec",
         "messages": [
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Score these headlines:\n\n{prompt_headlines}"}
-        ]
+        ],
+        "temperature": 0.0,
+        "max_tokens": 10
     }
 
     try:
-        # Perform POST to Anthropic Claude Endpoint
+        # Perform POST to Groq completions endpoint
         response = httpx.post(url, json=payload, headers=headers, timeout=10.0)
         if response.status_code == 200:
             data = response.json()
-            content = data.get("content", [])
-            if content:
-                text_result = content[0].get("text", "0.0").strip()
+            choices = data.get("choices", [])
+            if choices:
+                text_result = choices[0].get("message", {}).get("content", "0.0").strip()
                 try:
                     score = float(text_result)
                     score = max(-1.0, min(1.0, score))
-                    logger.info(f"[+] Claude API Sentiment Score: {score}")
+                    logger.info(f"[+] Groq API Sentiment Score: {score}")
                     return score
                 except ValueError:
-                    logger.warning(f"[!] Claude returned invalid float format: {text_result}")
-        logger.warning(f"[!] Claude API returned status {response.status_code}. Using local keyword fallback.")
+                    logger.warning(f"[!] Groq returned invalid float format: {text_result}")
+        logger.warning(f"[!] Groq API returned status {response.status_code}. Using local keyword fallback.")
         return _score_sentiment_locally(headlines)
     except Exception as e:
-        logger.error(f"[X] Exception during Claude sentiment call: {str(e)}. Using local keyword fallback.")
+        logger.error(f"[X] Exception during Groq sentiment call: {str(e)}. Using local keyword fallback.")
         return _score_sentiment_locally(headlines)
 
 # ==============================================================================
@@ -218,9 +218,9 @@ def analyze() -> Dict[str, Any]:
         reasons.append("No news headlines gathered. Defaulting news score to neutral (0.0)")
     else:
         # Determine analysis engine based on token presence
-        if config.ANTHROPIC_API_KEY and config.ANTHROPIC_API_KEY != "your_anthropic_api_key_here":
-            news_score = _score_sentiment_via_claude(headlines)
-            reasons.append(f"Headlines scored via Anthropic Claude API. Score: {news_score:+.2f}")
+        if config.GROQ_API_KEY and config.GROQ_API_KEY != "your_groq_api_key_here":
+            news_score = _score_sentiment_via_groq(headlines)
+            reasons.append(f"Headlines scored via Groq API. Score: {news_score:+.2f}")
         else:
             news_score = _score_sentiment_locally(headlines)
             reasons.append(f"Headlines scored via Local Keyword Scorer. Score: {news_score:+.2f}")

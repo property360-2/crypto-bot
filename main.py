@@ -234,9 +234,12 @@ async def run_bot_cycle() -> Dict[str, Any]:
                 "fear_and_greed": fng_score,
                 "news_score": sentiment_rep.get("indicators", {}).get("news_score", 0.0)
             }
-            # Save to firestore for status route access if database is initialized
+            # Save to firestore for status route access if database is initialized and active
             if firebase_client.db is not None:
-                firebase_client.db.collection("config").document("settings").set({"latest_sentiment": execution_report["global_sentiment"]}, merge=True)
+                try:
+                    firebase_client.db.collection("config").document("settings").set({"latest_sentiment": execution_report["global_sentiment"]}, merge=True)
+                except Exception as db_err:
+                    logger.error(f"[X] Failed to cache sentiment in Firestore: {str(db_err)}")
             else:
                 logger.warning("[!] Firestore db is uninitialized. Skipping news/F&G sentiment caching to db.")
 

@@ -1,0 +1,54 @@
+# ==============================================================================
+# File: .gitignore
+# Purpose: Specify untracked files that Git should ignore.
+# Fits into: Project version control security configuration.
+# ==============================================================================
+
+# 1. Environment Configurations and Secrets (CRITICAL SECURITY)
+.env
+.env.local
+.env.*.local
+*.env
+
+# 2. Python Environment and Packages
+venv/
+ENV/
+env/
+.env/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 3. Python Bytecode and Compilation caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.log
+
+# 4. OS and IDE Configurations
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
