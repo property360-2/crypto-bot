@@ -1,0 +1,14 @@
+# ==============================================================================
+# File: requirements.txt
+# Purpose: Defines python package dependencies for the Crypto Trading Bot.
+# Fits into: Project scaffolding, read by pip and Render to install runtime libs.
+# ==============================================================================
+
+fastapi[standard]>=0.136.0
+ccxt>=4.4.0
+pandas>=2.2.0
+pandas-ta-classic>=0.3.14b
+firebase-admin>=7.4.0
+python-telegram-bot>=22.0
+python-dotenv>=1.0.0
+httpx>=0.28.0
