@@ -94,6 +94,7 @@ def get_status() -> Dict[str, Any]:
             "last_stop_loss_time": last_sl.isoformat() if last_sl else None,
             "in_cooldown": risk_manager.is_in_cooldown(last_sl),
             "latest_sentiment": settings.get("latest_sentiment", {"fear_and_greed": 50, "news_score": 0.0}),
+            "recent_sweeps": firebase_client.get_recent_sweeps(limit=5),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
@@ -101,6 +102,90 @@ def get_status() -> Dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail="Internal server error loading status telemetry. Check server diagnostic logs."
+        )
+
+# ==============================================================================
+# TRADED LIST ROUTE
+# ==============================================================================
+
+@app.get("/traded", status_code=status.HTTP_200_OK)
+def get_traded_list(limit: int = Query(50, description="Max number of trades to fetch")) -> List[Dict[str, Any]]:
+    """
+    Exposes a history of all executed trades (both open and closed positions).
+    
+    Accepts:
+        limit (int): The maximum number of trade documents to fetch.
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries representing the trades.
+    """
+    try:
+        logger.info(f"[-] Fetching list of all traded assets (limit={limit}).")
+        trades = firebase_client.get_all_trades(limit=limit)
+        return trades
+    except Exception as e:
+        logger.error(f"[X] Exception loading traded list details: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error loading traded list: {str(e)}"
+        )
+
+# ==============================================================================
+# WAITED LIST ROUTE
+# ==============================================================================
+
+@app.get("/waited", status_code=status.HTTP_200_OK)
+def get_waited_list(limit: int = Query(20, description="Max number of wait sweeps to fetch")) -> List[Dict[str, Any]]:
+    """
+    Exposes a history of all sweep cycles where the bot evaluated the markets
+    but decided to WAIT (no trade opened).
+    
+    Accepts:
+        limit (int): The maximum number of wait cycles to fetch.
+    Returns:
+        List[Dict[str, Any]]: Filtered wait cycle execution logs.
+    """
+    try:
+        logger.info(f"[-] Fetching recent wait sweeps (limit={limit}).")
+        sweeps = firebase_client.get_recent_sweeps(limit=limit * 2) # Fetch extra to account for any that opened a trade
+        
+        waits = []
+        for sweep in sweeps:
+            scanned_pairs = sweep.get("scanned_pairs", {})
+            if not scanned_pairs:
+                continue
+                
+            # Check if this sweep resulted in any trade opened
+            has_trade = any(
+                "TRADE_OPENED" in str(details.get("execution", ""))
+                for details in scanned_pairs.values()
+            )
+            
+            # If no trades were opened during this entire sweep, it counts as a wait cycle!
+            if not has_trade:
+                wait_entry = {
+                    "timestamp": sweep.get("timestamp"),
+                    "global_sentiment": sweep.get("global_sentiment", {}),
+                    "reasons": {}
+                }
+                
+                for pair, details in scanned_pairs.items():
+                    wait_entry["reasons"][pair] = {
+                        "action": details.get("action"),
+                        "signal_score": details.get("signal_score"),
+                        "spot_price": details.get("spot_price"),
+                        "reasons": details.get("reasons", [])
+                    }
+                
+                waits.append(wait_entry)
+                if len(waits) >= limit:
+                    break
+                    
+        return waits
+    except Exception as e:
+        logger.error(f"[X] Exception loading waited list details: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error loading waited list: {str(e)}"
         )
 
 # ==============================================================================
@@ -277,7 +362,8 @@ async def run_bot_cycle() -> Dict[str, Any]:
                         "signal_score": combined_rep.get("final_signal"),
                         "rsi": momentum_rep.get("indicators", {}).get("rsi"),
                         "spot_price": price,
-                        "futures_price": arbitrage_rep.get("indicators", {}).get("futures_price", price)
+                        "futures_price": arbitrage_rep.get("indicators", {}).get("futures_price", price),
+                        "reasons": combined_rep.get("reasons", [])
                     }
 
                     # Trigger trade execution checks (Passing F&G index for extreme fear governance)
@@ -286,6 +372,9 @@ async def run_bot_cycle() -> Dict[str, Any]:
                         # Send alert on Telegram
                         alert_text = telegram_alerts.format_trade_alert(opened_trade)
                         await telegram_alerts.send_alert(alert_text)
+                        execution_report["scanned_pairs"][pair]["execution"] = f"TRADE_OPENED (Doc: {opened_trade.get('id')})"
+                    else:
+                        execution_report["scanned_pairs"][pair]["execution"] = "NO_TRADE (Signal neutral or blocked by risk gates)"
                         
                 except Exception as pair_error:
                     err_msg = f"Error processing market pair {pair}: {str(pair_error)}"
@@ -296,6 +385,9 @@ async def run_bot_cycle() -> Dict[str, Any]:
             duration = (cycle_end - cycle_start).total_seconds()
             logger.info(f"[+] CYCLE EXECUTION COMPLETED in {duration:.2f} seconds.")
             logger.info("================================================================")
+            
+            # Log sweep results to Firestore for status tracking
+            firebase_client.log_sweep(execution_report)
             
             return execution_report
 

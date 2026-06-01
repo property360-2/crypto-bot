@@ -326,3 +326,101 @@ def update_daily_performance(date_str: str, pnl_to_add: float, is_win: bool) -> 
     except Exception as e:
         logger.error(f"[X] Failed to update daily performance stats: {str(e)}")
         return False
+
+
+def log_sweep(sweep_data: Dict[str, Any]) -> None:
+    """
+    Logs a bot sweep cycle to /sweeps collection and maintains only the 10 most recent sweeps to conserve storage.
+    
+    Accepts:
+        sweep_data (dict): Complete sweep cycle execution report containing scanned pairs, sentiment, etc.
+    Returns:
+        None
+    """
+    if db is None:
+        logger.warning("[!] Firestore db is uninitialized. Skipping logging sweep to database.")
+        return
+
+    try:
+        # Enforce server-side timestamp for accuracy
+        sweep_record = sweep_data.copy()
+        sweep_record["timestamp"] = firestore.SERVER_TIMESTAMP
+        
+        # Save to sweeps collection
+        ref = db.collection("sweeps").document()
+        ref.set(sweep_record)
+        logger.info(f"[+] Logged sweep details to Firestore. Doc ID: {ref.id}")
+
+        # Keep only the 10 most recent sweeps to prevent unlimited storage growth
+        sweeps = db.collection("sweeps").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
+        count = 0
+        for doc in sweeps:
+            count += 1
+            if count > 10:
+                # Delete older document
+                db.collection("sweeps").document(doc.id).delete()
+                
+    except Exception as e:
+        logger.error(f"[X] Failed to log sweep to Firestore: {str(e)}")
+
+
+def get_recent_sweeps(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Retrieves the most recent execution sweeps from Firestore.
+    
+    Accepts:
+        limit (int): The maximum number of sweeps to retrieve (default 10).
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries representing the recent sweeps.
+    """
+    if db is None:
+        logger.warning("[!] Firestore db is uninitialized. Returning empty list for sweeps.")
+        return []
+
+    try:
+        query = db.collection("sweeps").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(limit).stream()
+        recent = []
+        for doc in query:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if "timestamp" in data and hasattr(data["timestamp"], "isoformat"):
+                data["timestamp"] = data["timestamp"].isoformat()
+            recent.append(data)
+        return recent
+    except Exception as e:
+        logger.error(f"[X] Failed to fetch recent sweeps from Firestore: {str(e)}")
+        return []
+
+
+def get_all_trades(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves all trades (both open and closed) from Firestore.
+    
+    Accepts:
+        limit (int): The maximum number of trades to fetch (default 50).
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries representing the trades.
+    """
+    if db is None:
+        logger.warning("[!] Firestore db is uninitialized. Returning empty trades.")
+        return []
+
+    try:
+        trades_ref = db.collection("trades")
+        query = trades_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(limit).stream()
+        
+        trades = []
+        for doc in query:
+            trade = doc.to_dict()
+            trade["id"] = doc.id
+            if "timestamp" in trade and hasattr(trade["timestamp"], "isoformat"):
+                trade["timestamp"] = trade["timestamp"].isoformat()
+            if "closed_at" in trade and hasattr(trade["closed_at"], "isoformat"):
+                trade["closed_at"] = trade["closed_at"].isoformat()
+            trades.append(trade)
+        return trades
+    except Exception as e:
+        logger.error(f"[X] Failed to retrieve all trades: {str(e)}")
+        return []
+
+
