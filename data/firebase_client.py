@@ -246,21 +246,40 @@ def get_last_stop_loss_time() -> Optional[datetime]:
 
     try:
         trades_ref = db.collection("trades")
-        # Query recently closed trades sorted by close timestamp
-        # NOTE: A simple composite index is needed if we filter by status AND sort.
-        # To avoid index requirement errors, we fetch the 10 most recent closed trades
-        # and search programmatically in memory.
-        query = trades_ref.where("status", "==", "closed").order_by("closed_at", direction=firestore.Query.DESCENDING).limit(10).stream()
+        # Fetch the closed trades without ordering in Firestore to avoid index errors
+        query = trades_ref.where("status", "==", "closed").limit(50).stream()
         
+        closed_trades = []
         for doc in query:
             trade = doc.to_dict()
+            closed_trades.append(trade)
+
+        # Helper function to parse close timestamp safely for sorting
+        def get_close_time(t: Dict[str, Any]) -> datetime:
+            cat = t.get("closed_at")
+            if isinstance(cat, datetime):
+                # Ensure timezone awareness
+                if cat.tzinfo is None:
+                    return cat.replace(tzinfo=timezone.utc)
+                return cat
+            elif isinstance(cat, str):
+                try:
+                    return datetime.fromisoformat(cat.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+            # Default minimum timestamp if none exists
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+        # Sort the closed trades by closed_at descending in memory
+        closed_trades.sort(key=get_close_time, reverse=True)
+        
+        for trade in closed_trades:
             # If the trade was a loss, classify it as a stop_loss trigger event
             pnl = trade.get("pnl", 0.0)
             if pnl < 0:
                 closed_at = trade.get("closed_at")
                 if isinstance(closed_at, datetime):
                     return closed_at
-                # If timestamp is standard Firestore string, parse it
                 elif isinstance(closed_at, str):
                     try:
                         return datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
